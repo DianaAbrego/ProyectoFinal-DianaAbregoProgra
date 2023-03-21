@@ -1,0 +1,569 @@
+; Archivo: main.s
+; Dispositivo: PIC16F887
+; Autor: diana abrego 
+; Compilador: pic-as (v2.30), MPLABX V5.40
+;
+; Programa: contador en el puerto A
+; Hardware: LEDs en el puerto A
+;
+; Creado: 19 mar, 2023
+PROCESSOR 16F887
+#include <xc.inc>
+    
+; configuration word 1
+CONFIG FOSC=INTRC_NOCLKOUT // Oscilador Interno sin salidas
+CONFIG WDTE=OFF // WDT disabled (reinicio repetitivo del pic)
+CONFIG PWRTE=OFF // PWRT enabled (espera de 72ms al iniciar)
+CONFIG MCLRE=OFF // El pin de MCLR se utiliza como I/O
+CONFIG CP=OFF	// Sin proteccion de codigo
+CONFIG CPD=OFF	// Sin proteccion de datos
+    
+CONFIG BOREN=OFF // Sin reinicio cuando el voltaje de alimentacion baja de 4V
+CONFIG IESO=OFF // Reinicio sin cambio de reloj de interno a externo
+CONFIG FCMEN=OFF // Cambio de reloj externo a interno en caso de fallo
+CONFIG LVP=OFF // Programacion en bajo voltaje permitida
+    
+;configuration word 2
+CONFIG WRT=OFF // Proteccion de autoescritura por el programa desactivada
+CONFIG BOR4V=BOR40V // Reinicio abajo de 4V, (BOR21V=2.1V)x
+
+PSECT udata_bank0 ;common memory
+	W_TEMP: DS 1; 1 byte
+	STATUS_TEMP: DS 1; 1 byte
+	pend: DS 1 ; para seleccionar la pendiente 
+	FREC: DS 1 ; frecuencia de la onda
+	NTmr0: DS 1 ; devolver el N con el que se va a cargar el nuemero del preload
+	selecdis: DS 1 ;
+	displayU: DS 1 ; valor que ya se  muestra en el display
+	displayD: DS 1
+	displayC: Ds 1 
+	nibbleU: DS 1 //valores en binario
+	nibbleD: DS 1
+	nibbleC: DS 1
+	residuo: Ds 1 ; residuo positivo de la resta
+	frecDec: DS 2
+	selecGraf: DS 1
+	
+    //BOTONES 
+	UP EQU 4 
+	DOWN EQU 5
+	CHANGE EQU 3
+ 
+    PSECT resVect, class=CODE, abs, delta=2
+    ;---------------vector reset-------------
+    ORG 00h	    ;posicion 0000h para el reset
+    resetVec:
+	PAGESEL main
+	goto main
+	
+    ;-------------- ISR ---------------------
+    PSECT code, delta=2, abs
+    ORG 004h		 ; posicion para el codigo
+    push:
+	movwf W_TEMP
+	swapf STATUS, W
+	movwf STATUS_TEMP
+	
+    isr:
+	btfsc RBIF
+	call int_rb
+	btfsc T0IF	;Cuando bandera se enciende es que hizo overflow
+	goto $+2
+	goto pop 
+	btfss selecGraf, 0
+	goto $+2	; para ir a la triangular 
+	goto $+3
+	call int_timer0 ; para ir a grafica cuadrada
+	goto $+2
+	call int_timer0Cua
+	BTFSC TMR2IF    ; 
+	call  int_tmr2
+	
+
+    
+    pop:
+	swapf STATUS_TEMP, W
+	movwf STATUS
+	swapf W_TEMP, F
+	swapf W_TEMP, W
+	retfie
+    ;-------------- ISR Subrutinas-----------------------
+    int_rb:
+	// para incrementar frecuencia
+	btfss PORTB, UP // SET no precionado 
+	CALL incrementarF
+	//para decrementar la frecuencia 
+	btfss PORTB, DOWN
+	CALL decrementarF
+	btfss PORTB, CHANGE 
+	incf selecGraf //TOGGLE 
+	bcf RBIF //****
+	RETURN
+	
+    int_timer0:
+	call conf_timer0
+	call RESETT0	; se resetea el valor del TMR0
+	bcf T0IF	; se apaga la bandera porque ya paso la interrupción
+	BTFSS pend, 0	; linea que va a indicar si sube o baja la grafica
+	GOTO posline	; linea positiva inclinacion derecha
+	GOTO negline	; linea negativa inclinacion a la izquierda, baja el valor 
+	
+      int_timer0Cua:	; interupcion pero de la cuadrada
+	call confTMER02	    ; configuracion timer0 pero para grafica cuadrada
+	bcf T0IF	; se apaga la bandera porque ya paso la interrupción
+	call RESETT0cua	; se resetea el valor del TMR0cuadrada
+	BTFSS pend, 0	; linea que va a indicar si es positiva 
+	GOTO posbit	; bit se va a encendier 
+	GOTO negbit	; bit se va a apagar 
+	
+    
+    ;-------------- EMPIEZA NUESTRO CODIGO ---------------
+    PSECT code, delta=2, abs
+    ORG 100h		    ; posicion para el codigo
+    
+tablaNTmr0: 
+    CLRF PCLATH 
+    BSF PCLATH,0 ; 0100h
+    ANDLW 0X1F
+    ADDWF PCL 
+    retlw 0x00 //0
+    retlw 0x08 //8
+    retlw 0x10 //16
+    retlw 0x18 //24
+    retlw 0x20 //32
+    retlw 0x28 //40
+    retlw 0x30 //48
+    retlw 0x38 //56
+    retlw 0x40 //64
+    retlw 0x48 //72
+    retlw 0x50 //80
+    retlw 0x58 //88
+    retlw 0x60 //96
+    retlw 0x68 //104
+    retlw 0x70 //112
+    retlw 0x78 //120
+    retlw 0x80 //128
+    retlw 0x88 //136
+    retlw 0x90 //144
+    retlw 0x98 //152
+    retlw 0xA0 //160
+    retlw 0xA8 //168
+    retlw 0xB0 //176
+    retlw 0xB8 //184
+    retlw 0xC0 //192
+    retlw 0xC8 //200
+    retlw 0xD0 //208
+    retlw 0xD8 //216
+    retlw 0xE0 //224
+    retlw 0xE8 //232
+    retlw 0xF0 //240
+    retlw 0xF8 //248
+    
+   
+    
+    
+    
+    tabla7seg:
+    CLRF PCLATH 
+    BSF PCLATH,0 ; 0100h
+    ANDLW 0X0F
+    ADDWF PCL 
+    RETLW 01000000B //0
+    RETLW 01111001B //1
+    RETLW 00100100B //2
+    RETLW 00110000B //3
+    RETLW 00011001B //4
+    RETLW 00010010B //5
+    RETLW 00000010B //6
+    RETLW 01111000B //7
+    RETLW 00000000B //8
+    RETLW 00010000B //9
+    RETLW 00001000B //A
+    RETLW 00000011B //b
+    RETLW 01000110B //C
+    RETLW 00100001B //d
+    RETLW 00000110B //E
+    RETLW 00001110B //F
+   
+   tablaFrec: 
+    CLRF PCLATH 
+    BSF PCLATH,0 ; 0100h
+    ANDLW 0X1F
+    ADDWF PCL 
+    retlw 14 // 1
+    retlw 14  //2
+    retlw 14  //3 
+    retlw 14 //4
+    retlw 15 //5
+    retlw 15 //6
+    retlw 16  //7
+    retlw 16  //8
+    retlw 18  //9
+    retlw 18 //10
+    retlw 19 // 21.42 //11 
+    retlw 19 //21.73 //12
+    retlw 21
+    retlw 23 //24.24 //
+    retlw 24 //25.97
+    retlw 26 //26.67
+    retlw 27 //28.57
+    retlw 28 //30.95
+    retlw 31 //32.05
+    retlw 33 //34.84
+    retlw 34 //35.97
+    retlw 37 //40
+    retlw 39 //43.80
+    retlw 42 //49.01
+    retlw 47 //51.41
+    retlw 53 //59.80
+    retlw 56 //67.75 // 14.75ms
+    retlw 62 //78.74 // 12.70ms
+    //retlw  //91.32 //10.95
+    //retlw 112 //102.24 //9.78
+    //retlw 105 //105.26 //9.50ms
+    //retlw 105
+    
+tablaNcua:  //tablaNtmr0cua
+    CLRF PCLATH 
+    BSF PCLATH,0 ; 0100h
+    ANDLW 0XF
+    ADDWF PCL 
+    retlw 150 //1
+    retlw 155 //2
+    retlw 160
+    retlw 165
+    retlw 170
+    retlw 175
+    retlw 180
+    retlw 185
+    retlw 195
+    retlw 200  //10
+    retlw 205
+    retlw 210 //
+    retlw 215
+    retlw 220
+    retlw 222
+    retlw 224
+    //retlw 226 //17
+   
+ 
+    
+    tablaFreccua: 
+    CLRF PCLATH 
+    BSF PCLATH,0 ; 0100h
+    ANDLW 0XF
+    ADDWF PCL  
+    retlw 73	
+    retlw 77 //2
+    retlw 82//3 
+    retlw 86 //4
+    retlw 91 //5
+    retlw 96 //6
+    retlw 102  //7
+    retlw 109 //8
+    retlw 127  //9
+    retlw 138 //10
+    retlw 152 // 21.42 //11 
+    retlw 169 //21.73 //12
+    retlw 189 //13
+    retlw 215 //24.24 //14
+    retlw 227 //25.97 //15
+    retlw 242 //26.67 // 16
+   // retlw 259 //28.57 //17
+    
+   
+    main:
+	//bcf RBIF
+	call setup_io	    ;inputs/ouputs
+	call setup_rbpu	    ;configurar el pullup
+	call setup_clk	    ; configuar el clk interno a 1mh
+	call conf_timer0    ; configurarf timer0 
+	call conf_timer2
+	call setup_iocb	    ; INTERRUPCION ON CHANCGE PORTB REGISTER
+	CLRF pend	    ; incializar la variable en 0
+	CLRF FREC	    ; incializar la variable en 0
+	CLRF NTmr0	    ; incializar la variable en 0
+	//CLRF NTmr0C
+
+	
+	BANKSEL PORTA
+	
+    ;--------------- LOOP -----------------------------------	
+    loop:
+	
+	CALL separar_num  
+	CLRF nibbleU
+	CLRF nibbleD
+	CLRF nibbleC
+	goto loop
+	
+	;-----------------SUBRUTINAS----------------------
+    setup_io:
+	BANKSEL ANSEL	; pines digitales
+	clrf ANSEL
+	clrf ANSELH
+	
+	BANKSEL TRISA
+	clrf TRISA	; PORTA como salida (Display 1s)
+	clrf TRISC	; PORTC como salida (display 10s)
+	clrf TRISD	; PORTD como salida
+	clrf TRISE	; PORTE como salida
+	bsf TRISB, UP	; PORTB PIN4 como entrada
+	bsf TRISB, DOWN ; PORTB PIN5 como entrada
+	
+	BANKSEL PORTA
+	clrf PORTA
+	clrf PORTB
+	clrf PORTC
+	clrf PORTD
+	clrf PORTE
+	RETURN
+	
+    setup_clk:
+	BANKSEL OSCCON
+	bsf SCS	    ; Oscilador interno
+	bsf IRCF2
+	bsf IRCF1
+	bsf IRCF0   ; Frecuencia de 8MHz 100
+	RETURN
+	
+    //CONFIGURAR PULL UP 
+    setup_rbpu:
+	BANKSEL TRISA
+	bcf OPTION_REG, 7 ;RBPU
+	bsf WPUB,DOWN
+	bsf WPUB, UP
+	bsf WPUB, CHANGE ; boton par cambiar onda 
+	RETURN
+	
+     //HABILITAR GIE ,//HABILITAR RBIE ,//PIN INDIVIDUAL IOCB
+    setup_iocb:
+	BANKSEL TRISA
+	bsf IOCB, UP
+	bsf IOCB, DOWN
+	bsf IOCB, CHANGE 
+	bsf RBIE ; para habilitar los botones en le puerto B
+	//CONF TMR2
+	bsf TMR2IE ;habilitar int del timer2 
+	BANKSEL PORTA 
+	bsf PEIE ; interrupcion periferica 
+	bcf TMR2IF ; para limpiar bandera 
+	//CONF TMR0 
+	bsf T0IE ; overlow interrupt enable bit 
+	bsf GIE ; interrupcion global
+	RETURN
+	
+    conf_timer0: 
+    //CONFIGURAR TIMER 0 
+	BANKSEL OPTION_REG
+    //USARA OSCILADOR INTERNO
+	BCF OPTION_REG, 5
+	BCF OPTION_REG, 4
+    ///PRESCALER DE 1:1
+	 BCF OPTION_REG, 2
+	 BCF OPTION_REG, 1
+	 BCF OPTION_REG, 0
+    //ASIGNAR EL PRESCALER A TIMER0
+	BSF OPTION_REG, 3 //PSA 
+	BANKSEL INTCON
+	BCF INTCON, 2 ; Se apaga la bandera de TMR0 O //TOIF =1
+	//MOVLW NTmr0
+	//MOVWF TMR0
+	RETURN 
+	
+	RESETT0:
+	MOVF	NTmr0, W
+	MOVWF	TMR0
+	RETURN
+	
+	
+	
+    conf_timer2: 
+	BANKSEL PORTA
+	MOVLW   10000100B //bits de configuración para habilitar cada pueto 
+	MOVWF   T2CON
+	BANKSEL TRISA 
+	MOVLW	167
+	MOVWF	PR2
+	BANKSEL PORTA
+	CLRF	TMR2 
+	BCF	TMR2IF 
+	RETURN 
+	
+    posline:
+	INCF PORTA	; se incrementa el puerto 
+	MOVF PORTA, W	; lo paso al W
+	SUBLW 254	; son 254 gradas las que se va a aumentar
+	BTFSS ZERO	; se compara con la bandera ZERO si est[a encendido salta para cambiar el toggle de la pendiente 
+	GOTO $+2
+	INCF pend 	; esta variable es la que cambia de 0 a 1 para ver la direccion de la pendiente 
+	RETURN
+    // misma logica se aplica para la pendiente negativa solo que se decrementa el perto
+    negline:
+	DECF PORTA 
+	MOVF PORTA, W
+	SUBLW 0		; ya que este empeiza desde el valor de 254 tiene que comparace con 0 
+	BTFSS ZERO 
+	GOTO $+2
+	INCF pend 
+	RETURN
+	
+    incrementarF: //incrementar el valor de preload N
+	incf FREC	// Esta variable es temporal par ingresar a la tabla que cuenta 
+	MOVF FREC, W	// con el N del TMR0 es decir el Preload
+	BTFSS selecGraf, 0 //si es se la triangular as[i modificar frec de triangular
+	goto $+2 // CLEAR TRIANGULAR
+	goto $+3 // SET ES CUADRDADA 
+	CALL tablaNTmr0 // en esta tabla se encuentra los preloads TRIANGULAR  
+	goto $+2
+	CALL tablaNcua // se encuentra los preloads de CUADRADA 
+	MOVWF NTmr0	// que luego se almacena en esta variable 
+	MOVF FREC, W	// se vuelve a utlizar la variable par que la tabla de frecuencias 
+	BTFSS selecGraf, 0 //si es se la triangular as[i modificar frec de triangular
+	goto $+2
+	goto $+3
+	CALL tablaFrec// en esta tabla se encuentra los preloads TRIANGULAR  
+	goto $+2
+	CALL tablaFreccua // se encuentra los preloads de CUADRADA 
+	MOVWF frecDec	// regresa el valor de la variable en decimal Sin dividir en el display 
+	RETURN 
+//misma lógica solo se decrementa la variable de FREC 
+    decrementarF: // decrementar N 
+	decf FREC
+	MOVF FREC, W
+	BTFSS selecGraf, 0 //si es se la triangular as[i modificar frec de triangular
+	goto $+2
+	goto $+3
+	CALL tablaNTmr0 // en esta tabla se encuentra los preloads TRIANGULAR  
+	goto $+2
+	CALL tablaNcua// se encuentra los preloads de CUADRADA 
+	MOVWF NTmr0
+	MOVF FREC, W	// se vuelve a utlizar la variable par que la tabla de frecuencias 
+	BTFSS selecGraf, 0 //si es se la triangular as[i modificar frec de triangular
+	goto $+2
+	goto $+3
+	CALL tablaFrec// en esta tabla se encuentra los preloads TRIANGULAR  
+	goto $+2
+	CALL tablaFreccua // se encuentra los preloads de CUADRADA 
+	MOVWF frecDec // regresa el valor de la variable en decimal 
+	RETURN 
+	
+;---------------------- 	
+;--------------------para displyas-----------------	
+separar_num: ; para poder separar decenas centenas unidades 
+	movf	frecDec, W	;numero que viene del valor en decimal de los HZ y KZR
+	movwf	residuo		;se mueve el acumulador que era lo que valia PORTA  a residuo
+	movlw	100		;W vale 100 
+	subwf	residuo, W	;resto residuo DE 100, lo guardo en W
+	btfss	CARRY		;reviso CARRY, si este es 0 es porque es negativo asi que 1 es valor positivo puede seguir restadno 
+	goto	$+4		;100 es mayor y ya no vuelvo a restar, porque CARRY es 0
+	movwf	residuo		;CARRY es 1, por lo que el resultado si lo guardo en residuo, y el resultado ews positivo
+	incf	nibbleC		; por lo tanto aumento el valor de centena
+	goto	$-6		 ;vuelvo a restar porque residuo es más de 100
+	
+	
+	movlw	10	; ya con el valor que haya quedado de residuo se va a restar 10
+	subwf	residuo, W
+	btfss	CARRY
+	goto    $+4 
+	movwf	residuo
+	incf	nibbleD
+	goto	$-6
+	
+	
+	movlw	1   ; ya luego ese valor igual se va  a pasar 
+	subwf	residuo, W
+	btfss	CARRY
+	goto	$+4
+	movwf	residuo
+	incf	nibbleU
+	goto	$-6
+	call	preparar_displays
+	return  
+	
+ // prepara para ver a que display se escribe cada número mandado en decimal    
+preparar_displays: 
+    MOVF nibbleU, W ; 
+    CALL tabla7seg
+    MOVWF displayU ; mostrara el valor de los nibbles low para mostrar en el display
+    
+    MOVF nibbleD, W
+    CALL tabla7seg
+    MOVWF displayD
+   
+    MOVF nibbleC, W
+    CALL tabla7seg
+    MOVWF displayC
+    RETURN  
+    /// esta es la interrupcion de los displays con implementando el TMR2
+    int_tmr2:
+	clrf TMR2
+	bcf TMR2IF 
+	CLRF PORTD // PARA QUE no este seleccionado ningun transistor
+	BTFSC selecdis, 1; donde esta mi display HIGH si no se va a Display LOW
+	GOTO display_C ;1x  aqui mi bit 2 tiene que estar en uno para que salte 
+	BTFSC selecdis, 0 ; solo si es 10 se va a ir a decenas
+	GOTO display_D ; decenas  
+    // display de unidades 
+    display_U:
+	MOVF displayU, W
+	MOVWF PORTC
+	BSF PORTD, 2 ; ABILITAR EL TRANSISOTRO PARA display low
+	GOTO toggle
+    //Display de decenas 
+    display_D: ;01
+	MOVF displayD, W
+	MOVWF PORTC
+	BSF PORTD, 1
+	GOTO toggle
+    // display de centenas 
+    display_C:
+	MOVF displayC, W
+	MOVWF PORTC
+	BSF PORTD, 0
+    toggle: ;hace que la bandera de los selectores del display cambien de 1 a 0
+	incf selecdis	
+	return
+;--------------------------------FUNCION CUADRADA ------------------
+FucCuadrada:
+    bcf RBIF
+    CALL confTMER02
+    CALL RESETT0cua
+    INCF PORTE 
+     
+confTMER02: ; Para la configuracion del TMR0 DE CUADRADA 
+    //CONFIGURAR TIMER 0 
+	BANKSEL OPTION_REG
+    //USARA OSCILADOR INTERNO
+	BCF OPTION_REG, 5
+	BCF OPTION_REG, 4
+    ///PRESCALER DE 1:256
+	 BSF OPTION_REG, 2
+	 BSF OPTION_REG, 1
+	 BCF OPTION_REG, 0
+    //ASIGNAR EL PRESCALER A TIMER0
+	BCF OPTION_REG, 3 //PSA 
+	BANKSEL INTCON
+	BCF INTCON, 2 ; Se apaga la bandera de TMR0 O //TOIF =1
+	MOVLW NTmr0
+	MOVWF TMR0
+	RETURN 
+	
+	RESETT0cua:
+	MOVF	NTmr0, W
+	MOVWF	TMR0
+	RETURN
+	
+	posbit:
+	    MOVLW 11111111B
+	    MOVWF PORTA 
+	    INCF pend 
+	    RETURN
+	negbit:
+	    MOVLW 00000000B
+	    MOVWF PORTA 
+	    INCF pend 
+	    RETURN
+ 
+    
+END
